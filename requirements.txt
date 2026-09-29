@@ -1,0 +1,20 @@
+# Core LangChain ecosystem
+langchain>=0.3.19
+langchain-openai>=0.3.7
+langchain-core>=0.3.80
+langchain-community>=0.3.18
+langchain-text-splitters>=0.3.11
+langgraph>=0.4.0
+
+# Vector store (direct SDK — langchain-pinecone has broken deps on Python 3.14)
+pinecone>=5.0.0
+
+# PDF processing
+pypdf>=6.0.0
+
+# API
+fastapi>=0.115.0
+uvicorn[standard]>=0.34.0
+
+# Environment
+python-dotenv>=1.0.1
