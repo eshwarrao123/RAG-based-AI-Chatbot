@@ -32,8 +32,8 @@ def test_pydantic_models():
     
     # Valid request
     try:
-        req = ChatRequest(question="What is Agentic AI?")
-        assert req.question == "What is Agentic AI?"
+        req = ChatRequest(query="What is Agentic AI?")
+        assert req.query == "What is Agentic AI?"
         print("  [OK] Valid ChatRequest accepted")
     except Exception as e:
         print(f"  [FAIL] Valid request rejected: {e}")
@@ -41,17 +41,17 @@ def test_pydantic_models():
     
     # Empty question should fail
     try:
-        ChatRequest(question="")
-        print("  [FAIL] Empty question was accepted (should be rejected)")
-        assert False, "Empty question should be rejected"
+        ChatRequest(query="")
+        print("  [FAIL] Empty query was accepted (should be rejected)")
+        assert False, "Empty query should be rejected"
     except Exception:
-        print("  [OK] Empty question rejected")
+        print("  [OK] Empty query rejected")
     
     # Whitespace trimming
     try:
-        req = ChatRequest(question="  Test question  ")
-        assert req.question.strip() == "Test question"
-        print("  [OK] Question validation works")
+        req = ChatRequest(query="  Test question  ")
+        assert req.query.strip() == "Test question"
+        print("  [OK] Query validation works")
     except Exception as e:
         print(f"  [FAIL] Validation failed: {e}")
         raise
@@ -65,13 +65,15 @@ def test_pydantic_models():
             relevance_score=0.87
         )
         response = ChatResponse(
-            answer="Test answer",
-            context=[chunk],
+            query="What is Agentic AI?",
+            final_answer="Test answer",
+            retrieved_context_chunks=[chunk],
             confidence_score=0.84
         )
-        assert response.answer == "Test answer"
-        assert len(response.context) == 1
-        assert response.context[0].page == 5
+        assert response.query == "What is Agentic AI?"
+        assert response.final_answer == "Test answer"
+        assert len(response.retrieved_context_chunks) == 1
+        assert response.retrieved_context_chunks[0].page == 5
         assert response.confidence_score == 0.84
         print("  [OK] ChatResponse structure valid")
     except Exception as e:
@@ -126,14 +128,14 @@ def test_chat_request_schema():
         client = TestClient(app)
         
         # Test empty question rejection
-        response = client.post("/chat", json={"question": ""})
+        response = client.post("/chat", json={"query": ""})
         assert response.status_code == 422  # Validation error
-        print("  [OK] Empty question rejected with 422")
+        print("  [OK] Empty query rejected with 422")
         
         # Test missing question field
         response = client.post("/chat", json={})
         assert response.status_code == 422
-        print("  [OK] Missing question field rejected with 422")
+        print("  [OK] Missing query field rejected with 422")
         
         # Test invalid JSON
         response = client.post("/chat", data="invalid")

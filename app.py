@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 class ChatRequest(BaseModel):
     """Request body for the /chat endpoint."""
-    question: str = Field(
+    query: str = Field(
         ...,
         min_length=1,
         max_length=1000,
@@ -46,8 +46,9 @@ class ContextChunk(BaseModel):
 
 class ChatResponse(BaseModel):
     """Response body for the /chat endpoint."""
-    answer: str
-    context: list[ContextChunk]
+    query: str
+    final_answer: str
+    retrieved_context_chunks: list[ContextChunk]
     confidence_score: float
 
 
@@ -107,17 +108,19 @@ async def chat(request: ChatRequest):
     Submit a question and receive a grounded answer from the Agentic AI eBook.
 
     The response includes:
+    - The original query
     - The generated answer (grounded in retrieved context)
     - Retrieved context chunks with source/page metadata
     - A confidence score based on retrieval similarity
     """
     try:
-        logger.info("Chat request: %s", request.question)
-        result = query_rag(request.question)
+        logger.info("Chat request: %s", request.query)
+        result = query_rag(request.query)
 
         return ChatResponse(
-            answer=result["answer"],
-            context=[ContextChunk(**chunk) for chunk in result["context"]],
+            query=request.query,
+            final_answer=result["answer"],
+            retrieved_context_chunks=[ContextChunk(**chunk) for chunk in result["context"]],
             confidence_score=result["confidence_score"],
         )
 

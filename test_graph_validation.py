@@ -68,13 +68,6 @@ def test_imports():
     print("\n[OK] Testing critical imports...")
     
     try:
-        from langchain_pinecone import PineconeVectorStore
-        print("  [OK] langchain_pinecone imported")
-    except ImportError as e:
-        print(f"  [FAIL] langchain_pinecone import failed: {e}")
-        raise
-    
-    try:
         from langchain_openai import ChatOpenAI, OpenAIEmbeddings
         print("  [OK] langchain_openai imported")
     except ImportError as e:
@@ -93,6 +86,13 @@ def test_imports():
         print("  [OK] pinecone imported")
     except ImportError as e:
         print(f"  [FAIL] pinecone import failed: {e}")
+        raise
+    
+    try:
+        from langchain_community.document_loaders import PyPDFLoader
+        print("  [OK] langchain_community imported")
+    except ImportError as e:
+        print(f"  [FAIL] langchain_community import failed: {e}")
         raise
     
     print("  [OK] All imports successful")

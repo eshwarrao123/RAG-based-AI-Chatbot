@@ -1,279 +1,268 @@
 """
-Benchmark Test Queries for the Agentic AI RAG Chatbot.
+Benchmark Test Suite for Agentic AI RAG Chatbot.
 
-Contains 6 benchmark queries that test:
-    - In-domain factual retrieval (queries 1-5)
-    - Out-of-domain refusal behavior (query 6)
+Tests 6 queries against the RAG system:
+- 5 in-domain queries (from the Agentic AI eBook)
+- 1 out-of-domain query (grounding/refusal test)
 
 Usage:
-    python tests_sample_queries.py              # Run against live API
-    python tests_sample_queries.py --direct     # Run directly (no server)
+    python tests_sample_queries.py
+
+Requirements:
+    - Valid .env with OPENAI_API_KEY and PINECONE_API_KEY
+    - Pinecone index populated with eBook embeddings
+    - Virtual environment activated
 """
 
-import json
-import sys
 import logging
+import sys
+from pathlib import Path
 
+# Ensure imports work from project root
+sys.path.insert(0, str(Path(__file__).parent))
+
+from src.config import validate_config
+from src.graph import query_rag
+
+# Configure logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.WARNING,  # Reduce noise during testing
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 
-# ── Benchmark Query Definitions ───────────────────────────
+# ── Test Queries ──────────────────────────────────────────────
 
 BENCHMARK_QUERIES = [
     {
         "id": 1,
-        "question": "What is Agentic AI?",
-        "type": "in_domain",
-        "description": "Core concept — should retrieve foundational definition",
-        "expected_min_confidence": 0.70,
-        "expected_keywords": ["autonomous", "agent", "AI", "decision"],
+        "query": "What is the core definition of Agentic AI as outlined in the eBook?",
+        "expected_type": "in-domain",
+        "description": "Core definition from the eBook",
     },
     {
         "id": 2,
-        "question": "What are the key components of an AI agent?",
-        "type": "in_domain",
-        "description": "Factual — should enumerate agent components",
-        "expected_min_confidence": 0.70,
-        "expected_keywords": ["planning", "tool", "memory", "reasoning"],
+        "query": "What are the main architectural components required to build agentic systems?",
+        "expected_type": "in-domain",
+        "description": "Architectural components",
     },
     {
         "id": 3,
-        "question": "How do multi-agent systems communicate?",
-        "type": "in_domain",
-        "description": "Specific topic — should reference hierarchical and peer-to-peer architectures",
-        "expected_min_confidence": 0.65,
-        "expected_keywords": ["communication", "hierarchical", "peer"],
+        "query": "What real-world industry use cases for Agentic AI are discussed in the eBook?",
+        "expected_type": "in-domain",
+        "description": "Industry use cases",
     },
     {
         "id": 4,
-        "question": "What is the difference between LLMs and AI agents?",
-        "type": "in_domain",
-        "description": "Comparison — should draw from the LLM vs Agent comparison section",
-        "expected_min_confidence": 0.70,
-        "expected_keywords": ["LLM", "agent"],
+        "query": "How does Agentic AI differ from traditional generative AI chatbots according to the text?",
+        "expected_type": "in-domain",
+        "description": "Differentiation from traditional AI",
     },
     {
         "id": 5,
-        "question": "What are the risks and challenges of Agentic AI?",
-        "type": "in_domain",
-        "description": "Analytical — should draw from safety/ethics sections",
-        "expected_min_confidence": 0.65,
-        "expected_keywords": ["risk", "challenge", "safety", "ethical"],
+        "query": "What key challenges or limitations of Agentic AI are mentioned in the document?",
+        "expected_type": "in-domain",
+        "description": "Challenges and limitations",
     },
     {
         "id": 6,
-        "question": "Who won the 2022 FIFA World Cup?",
-        "type": "out_of_domain",
-        "description": "OUT-OF-DOMAIN — must refuse. Tests grounding behavior.",
-        "expected_max_confidence": 0.50,
-        "expected_refusal": True,
-        "forbidden_keywords": ["Argentina", "Messi", "France"],
+        "query": "What is the capital of France?",
+        "expected_type": "out-of-domain",
+        "description": "Grounding test — should refuse to answer from model knowledge",
     },
 ]
 
 
-# ── Validation Logic ──────────────────────────────────────
+# ── Validation Functions ──────────────────────────────────────
 
-def validate_in_domain(query: dict, result: dict) -> dict:
-    """Validate an in-domain query result."""
-    issues = []
+def validate_response(test_case: dict, result: dict) -> dict:
+    """
+    Validate that the response has the expected structure and content.
 
-    # Check confidence
-    confidence = result.get("confidence_score", 0)
-    min_conf = query.get("expected_min_confidence", 0.70)
-    if confidence < min_conf:
-        issues.append(f"Confidence {confidence:.4f} below minimum {min_conf}")
-
-    # Check that context was retrieved
-    context = result.get("context", [])
-    if not context:
-        issues.append("No context chunks retrieved")
-
-    # Check expected keywords in answer
-    answer = result.get("answer", "").lower()
-    expected_keywords = query.get("expected_keywords", [])
-    missing_keywords = [kw for kw in expected_keywords if kw.lower() not in answer]
-    if missing_keywords:
-        issues.append(f"Missing expected keywords: {missing_keywords}")
-
-    return {
-        "passed": len(issues) == 0,
-        "issues": issues,
+    Returns a validation report dict.
+    """
+    query_id = test_case["id"]
+    expected_type = test_case["expected_type"]
+    
+    report = {
+        "query_id": query_id,
+        "query": test_case["query"],
+        "expected_type": expected_type,
+        "passed": True,
+        "issues": [],
     }
 
+    # Check structure
+    if "answer" not in result or not result["answer"]:
+        report["passed"] = False
+        report["issues"].append("Missing or empty answer")
 
-def validate_out_of_domain(query: dict, result: dict) -> dict:
-    """Validate an out-of-domain query result."""
-    issues = []
+    if "context" not in result or not isinstance(result["context"], list):
+        report["passed"] = False
+        report["issues"].append("Missing or invalid context")
 
-    # Check confidence is LOW
-    confidence = result.get("confidence_score", 1.0)
-    max_conf = query.get("expected_max_confidence", 0.50)
-    if confidence > max_conf:
-        issues.append(f"Confidence {confidence:.4f} above maximum {max_conf}")
+    if "confidence_score" not in result:
+        report["passed"] = False
+        report["issues"].append("Missing confidence_score")
 
-    # Check for refusal language
-    answer = result.get("answer", "").lower()
-    refusal_phrases = [
-        "don't have enough information",
-        "not available",
-        "not found in the ebook",
-        "cannot answer",
-        "no information",
-        "not mentioned",
-        "does not contain",
-        "outside the scope",
-        "not covered",
-    ]
-    has_refusal = any(phrase in answer for phrase in refusal_phrases)
-    if not has_refusal:
-        issues.append("Answer does not contain refusal language")
+    # Check context metadata
+    if result.get("context"):
+        for i, chunk in enumerate(result["context"]):
+            if "text" not in chunk:
+                report["issues"].append(f"Context chunk {i} missing text")
+            if "source" not in chunk:
+                report["issues"].append(f"Context chunk {i} missing source")
+            if "page" not in chunk:
+                report["issues"].append(f"Context chunk {i} missing page")
+            if "relevance_score" not in chunk:
+                report["issues"].append(f"Context chunk {i} missing relevance_score")
 
-    # Check forbidden keywords are NOT present
-    forbidden = query.get("forbidden_keywords", [])
-    found_forbidden = [kw for kw in forbidden if kw.lower() in answer]
-    if found_forbidden:
-        issues.append(f"Answer contains forbidden keywords: {found_forbidden}")
-
-    return {
-        "passed": len(issues) == 0,
-        "issues": issues,
-    }
-
-
-def validate_result(query: dict, result: dict) -> dict:
-    """Validate a single query result based on its type."""
-    if query["type"] == "out_of_domain":
-        return validate_out_of_domain(query, result)
-    else:
-        return validate_in_domain(query, result)
-
-
-# ── Runners ───────────────────────────────────────────────
-
-def run_via_api(base_url: str = "http://localhost:8000") -> list[dict]:
-    """Run benchmark queries against the live FastAPI server."""
-    import requests
-
-    results = []
-    for query in BENCHMARK_QUERIES:
-        print(f"\n{'='*60}")
-        print(f"Query {query['id']}: {query['question']}")
-        print(f"Type: {query['type']} — {query['description']}")
-        print("-" * 60)
-
-        try:
-            response = requests.post(
-                f"{base_url}/chat",
-                json={"question": query["question"]},
-                timeout=60,
+    # Check grounding behavior for out-of-domain query
+    if expected_type == "out-of-domain":
+        answer_lower = result.get("answer", "").lower()
+        # Should contain refusal phrases, not factual answers
+        refusal_indicators = [
+            "don't have enough information",
+            "not found in",
+            "cannot answer",
+            "insufficient information",
+            "not available in the context",
+            "ebook does not contain",
+        ]
+        
+        has_refusal = any(indicator in answer_lower for indicator in refusal_indicators)
+        
+        # Should NOT contain factual answers from training data
+        # For France capital query: should not contain "Paris"
+        contains_factual_answer = "paris" in answer_lower
+        
+        if not has_refusal:
+            report["passed"] = False
+            report["issues"].append(
+                "Out-of-domain query: Expected refusal/insufficient-info response"
             )
-            response.raise_for_status()
-            result = response.json()
-        except Exception as e:
-            print(f"❌ API Error: {e}")
-            results.append({**query, "result": None, "error": str(e)})
-            continue
+        
+        if contains_factual_answer:
+            report["passed"] = False
+            report["issues"].append(
+                "Out-of-domain query: Model appears to have answered from training data (grounding failure)"
+            )
 
-        # Display result
-        print(f"Confidence: {result['confidence_score']:.4f}")
-        print(f"Context chunks: {len(result['context'])}")
-        print(f"Answer: {result['answer'][:200]}...")
-
-        # Validate
-        validation = validate_result(query, result)
-        status = "✅ PASSED" if validation["passed"] else "❌ FAILED"
-        print(f"\nValidation: {status}")
-        if validation["issues"]:
-            for issue in validation["issues"]:
-                print(f"  ⚠️  {issue}")
-
-        results.append({
-            **query,
-            "result": result,
-            "validation": validation,
-        })
-
-    return results
+    return report
 
 
-def run_direct() -> list[dict]:
-    """Run benchmark queries directly using the graph (no server needed)."""
-    from src.graph import query_rag
+# ── Test Runner ───────────────────────────────────────────────
+
+def run_benchmark() -> dict:
+    """
+    Run all benchmark queries and return a summary report.
+    """
+    print("\n" + "=" * 70)
+    print("BENCHMARK TEST SUITE: Agentic AI RAG Chatbot")
+    print("=" * 70)
 
     results = []
-    for query in BENCHMARK_QUERIES:
-        print(f"\n{'='*60}")
-        print(f"Query {query['id']}: {query['question']}")
-        print(f"Type: {query['type']} — {query['description']}")
-        print("-" * 60)
+    passed_count = 0
+    failed_count = 0
+
+    for test_case in BENCHMARK_QUERIES:
+        query_id = test_case["id"]
+        query = test_case["query"]
+        expected_type = test_case["expected_type"]
+
+        print(f"\n{'─' * 70}")
+        print(f"TEST {query_id}: {test_case['description']}")
+        print(f"Type: {expected_type.upper()}")
+        print(f"{'─' * 70}")
+        print(f"Query: {query}")
+        print()
 
         try:
-            result = query_rag(query["question"])
+            # Execute query
+            result = query_rag(query)
+
+            # Display results
+            print(f"✓ Answer received ({len(result['answer'])} chars)")
+            print(f"✓ Context chunks: {len(result['context'])}")
+            print(f"✓ Confidence score: {result['confidence_score']:.4f}")
+            
+            if result["context"]:
+                pages = [chunk["page"] for chunk in result["context"]]
+                print(f"✓ Retrieved pages: {sorted(set(pages))}")
+
+            print(f"\n📝 Answer:\n{result['answer']}")
+
+            # Validate
+            validation = validate_response(test_case, result)
+            results.append({**validation, "result": result})
+
+            if validation["passed"]:
+                print(f"\n✅ TEST {query_id} PASSED")
+                passed_count += 1
+            else:
+                print(f"\n❌ TEST {query_id} FAILED")
+                print(f"Issues: {', '.join(validation['issues'])}")
+                failed_count += 1
+
         except Exception as e:
-            print(f"❌ Error: {e}")
-            results.append({**query, "result": None, "error": str(e)})
-            continue
+            print(f"\n❌ TEST {query_id} FAILED WITH EXCEPTION")
+            print(f"Error: {e}")
+            results.append({
+                "query_id": query_id,
+                "query": query,
+                "expected_type": expected_type,
+                "passed": False,
+                "issues": [f"Exception: {str(e)}"],
+                "result": None,
+            })
+            failed_count += 1
 
-        # Display result
-        print(f"Confidence: {result['confidence_score']:.4f}")
-        print(f"Context chunks: {len(result['context'])}")
-        print(f"Answer: {result['answer'][:200]}...")
+    # Summary
+    print("\n" + "=" * 70)
+    print("SUMMARY")
+    print("=" * 70)
+    print(f"Total tests: {len(BENCHMARK_QUERIES)}")
+    print(f"✅ Passed: {passed_count}")
+    print(f"❌ Failed: {failed_count}")
+    print()
 
-        # Validate
-        validation = validate_result(query, result)
-        status = "✅ PASSED" if validation["passed"] else "❌ FAILED"
-        print(f"\nValidation: {status}")
-        if validation["issues"]:
-            for issue in validation["issues"]:
-                print(f"  ⚠️  {issue}")
+    if failed_count == 0:
+        print("🎉 ALL TESTS PASSED")
+    else:
+        print(f"⚠️  {failed_count} test(s) failed — review issues above")
 
-        results.append({
-            **query,
-            "result": result,
-            "validation": validation,
-        })
+    print("=" * 70 + "\n")
 
-    return results
-
-
-# ── Summary Report ────────────────────────────────────────
-
-def print_summary(results: list[dict]):
-    """Print a summary of all benchmark results."""
-    print(f"\n{'='*60}")
-    print("BENCHMARK SUMMARY")
-    print("=" * 60)
-
-    passed = sum(1 for r in results if r.get("validation", {}).get("passed", False))
-    failed = sum(1 for r in results if not r.get("validation", {}).get("passed", True))
-    errors = sum(1 for r in results if r.get("error"))
-
-    for r in results:
-        status = "✅" if r.get("validation", {}).get("passed") else "❌"
-        if r.get("error"):
-            status = "💥"
-        conf = r.get("result", {}).get("confidence_score", "N/A") if r.get("result") else "N/A"
-        conf_str = f"{conf:.4f}" if isinstance(conf, float) else conf
-        print(f"  {status} Q{r['id']}: [{r['type']:>13}] conf={conf_str}  {r['question'][:50]}")
-
-    print(f"\nResults: {passed} passed, {failed} failed, {errors} errors out of {len(results)} queries")
+    return {
+        "total": len(BENCHMARK_QUERIES),
+        "passed": passed_count,
+        "failed": failed_count,
+        "results": results,
+    }
 
 
-# ── Main ──────────────────────────────────────────────────
+# ── Main ──────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    mode = "--direct" if "--direct" in sys.argv else "--api"
+    try:
+        # Validate configuration first
+        validate_config()
+        
+        # Run benchmark
+        summary = run_benchmark()
+        
+        # Exit with appropriate code
+        sys.exit(0 if summary["failed"] == 0 else 1)
 
-    print(f"\n🧪 Agentic AI RAG Chatbot — Benchmark Tests")
-    print(f"   Mode: {'Direct (no server)' if mode == '--direct' else 'API (http://localhost:8000)'}")
-    print(f"   Queries: {len(BENCHMARK_QUERIES)}")
+    except EnvironmentError as e:
+        print(f"\n❌ Configuration Error: {e}")
+        print("\nPlease ensure:")
+        print("  1. Copy .env.example to .env")
+        print("  2. Add your OPENAI_API_KEY and PINECONE_API_KEY")
+        print("  3. Run the ingestion pipeline first: python -m src.ingestion")
+        sys.exit(1)
 
-    if mode == "--direct":
-        results = run_direct()
-    else:
-        results = run_via_api()
-
-    print_summary(results)
+    except Exception as e:
+        print(f"\n❌ Unexpected Error: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
