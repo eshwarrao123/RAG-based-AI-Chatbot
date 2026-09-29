@@ -1,14 +1,14 @@
 # Core LangChain ecosystem
 langchain==0.3.19
-langchain-openai==0.3.7
-langchain-core==0.3.80
+langchain-core==1.6.5
+langchain-openai==1.6.6
 langchain-community==0.3.18
 langchain-text-splitters==0.3.11
 langgraph==0.4.0
 
 # Vector store
 langchain-pinecone==0.2.13
-pinecone==5.4.2
+pinecone==7.3.0
 
 # PDF processing
 pypdf==5.1.0
